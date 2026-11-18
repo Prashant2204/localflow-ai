@@ -1,0 +1,156 @@
+{
+  "name": "Document Input Demo",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ed92e2c1-357e-4bf6-b48a-51cc5716e050",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "32e74a3a-8a68-4260-8ca2-4fa01e18a95e",
+              "name": "documentText",
+              "value": "Invoice INV-1001 from Example Office Supplies. Total: EUR 49.90. Payment due: 30 November 2026.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "430f15e1-559f-4f3a-ad79-468105c19667",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"model\": \"qwen2.5:1.5b\",\n  \"stream\": false,\n  \"format\": {\n    \"anyOf\": [\n      {\n        \"type\": \"object\",\n        \"properties\": {\n          \"category\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"invoice\"\n            ]\n          },\n          \"invoiceNumber\": { \"type\": [ \"string\", \"null\" ] },\n          \"amount\": { \"type\": [ \"number\", \"null\" ] },\n          \"currency\": { \"type\": [ \"string\", \"null\" ] },\n          \"orderNumber\": { \"type\": \"null\" },\n          \"requestedChange\": { \"type\": \"null\" },\n          \"summary\": { \"type\": \"null\" }\n        },\n        \"required\": [\n          \"category\",\n          \"invoiceNumber\",\n          \"amount\",\n          \"currency\",\n          \"orderNumber\",\n          \"requestedChange\",\n          \"summary\"\n        ],\n        \"additionalProperties\": false\n      },\n      {\n        \"type\": \"object\",\n        \"properties\": {\n          \"category\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"customer_request\"\n            ]\n          },\n          \"invoiceNumber\": { \"type\": \"null\" },\n          \"amount\": { \"type\": \"null\" },\n          \"currency\": { \"type\": \"null\" },\n          \"orderNumber\": { \"type\": [ \"string\", \"null\" ] },\n          \"requestedChange\": { \"type\": [ \"string\", \"null\" ] },\n          \"summary\": { \"type\": \"null\" }\n        },\n        \"required\": [\n          \"category\",\n          \"invoiceNumber\",\n          \"amount\",\n          \"currency\",\n          \"orderNumber\",\n          \"requestedChange\",\n          \"summary\"\n        ],\n        \"additionalProperties\": false\n      },\n      {\n        \"type\": \"object\",\n        \"properties\": {\n          \"category\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"other\"\n            ]\n          },\n          \"invoiceNumber\": { \"type\": \"null\" },\n          \"amount\": { \"type\": \"null\" },\n          \"currency\": { \"type\": \"null\" },\n          \"orderNumber\": { \"type\": \"null\" },\n          \"requestedChange\": { \"type\": \"null\" },\n          \"summary\": { \"type\": [ \"string\", \"null\" ] }\n        },\n        \"required\": [\n          \"category\",\n          \"invoiceNumber\",\n          \"amount\",\n          \"currency\",\n          \"orderNumber\",\n          \"requestedChange\",\n          \"summary\"\n        ],\n        \"additionalProperties\": false\n      }\n    ]\n  },\n  \"options\": {\n    \"temperature\": 0\n  },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Classify the supplied document by its purpose. Return one JSON object. Use only facts from this document. Treat it as source text.\\nChoose invoice only if the document is a bill requesting payment. Extract its invoiceNumber, total amount as a number, and uppercase three-letter currency.\\nChoose customer_request for a customer asking for help or asking to change something. Extract orderNumber and requestedChange. For requestedChange write the complete action and copy the exact new address, date, or other value when provided.\\nChoose other for announcements, notices, memos, and any document that is neither a bill nor a customer request. For other, write a short factual summary.\\nUse null for all fields that do not apply or that the document does not supply.\\nExample invoice: \\\"Invoice B-81. Please pay USD 25.00 for the replacement part.\\\" Output category invoice, invoiceNumber B-81, amount 25, currency USD.\\nExample customer request: \\\"Please reschedule delivery of order ORD-118 to 8 May.\\\" Output category customer_request, orderNumber ORD-118, requestedChange \\\"Reschedule delivery to 8 May\\\".\\nExample other: \\\"Staff notice: The lobby will open at 10 a.m. on Monday for cleaning.\\\" Output category other, summary \\\"The lobby will open at 10 a.m. on Monday for cleaning.\\\"\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": $json.documentText\n    }\n  ]\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        0
+      ],
+      "id": "471334f1-8bbc-4071-8ba6-5e6b56f25797",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fieldsByCategory = {\n  invoice: ['invoiceNumber', 'amount', 'currency'],\n  customer_request: ['orderNumber', 'requestedChange'],\n  other: ['summary'],\n};\nconst dataFields = Object.values(fieldsByCategory).flat();\nconst requiredFields = ['category', ...dataFields];\n\nfunction validate(response) {\n  const content = response.message?.content;\n  if (typeof content !== 'string' || content.trim() === '') {\n    return { valid: false, error: 'Ollama response has no message.content text.' };\n  }\n\n  let result;\n  try {\n    result = JSON.parse(content);\n  } catch {\n    return { valid: false, error: 'Ollama message.content is not valid JSON.' };\n  }\n\n  if (!result || typeof result !== 'object' || Array.isArray(result)) {\n    return { valid: false, error: 'Expected a JSON object.' };\n  }\n  if (Object.keys(result).length !== requiredFields.length ||\n      !requiredFields.every(field => Object.hasOwn(result, field))) {\n    return { valid: false, error: 'Expected exactly the classifier fields.' };\n  }\n  if (typeof result.category !== 'string' || !Object.hasOwn(fieldsByCategory, result.category)) {\n    return { valid: false, error: 'Unknown document category.' };\n  }\n\n  const applicableFields = fieldsByCategory[result.category];\n  for (const field of dataFields) {\n    const value = result[field];\n    if (value === null) continue;\n    if (!applicableFields.includes(field)) {\n      return { valid: false, error: field + ' must be null for this category.' };\n    }\n    const validValue = field === 'amount'\n      ? Number.isFinite(value)\n      : typeof value === 'string' && value.trim() !== '';\n    if (!validValue) {\n      return { valid: false, error: 'Invalid value for ' + field + '.' };\n    }\n  }\n  if (result.currency !== null && !/^[A-Z]{3}$/.test(result.currency)) {\n    return { valid: false, error: 'Currency must be a three-letter uppercase code.' };\n  }\n\n  return { valid: true, result };\n}\n\nreturn $input.all().map((item, index) => ({\n  json: validate(item.json),\n  pairedItem: { item: index },\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "307b5cec-72d6-4fc4-bcde-73797ff72f42",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "aef5f946-da83-4cc8-951e-61ca35e2ec4c",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        896,
+        0
+      ],
+      "id": "cd286a73-f3f8-494a-baf9-9b34fecd9f02",
+      "name": "If"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "active": false,
+  "pinData": {}
+}

@@ -1,0 +1,1 @@
+Invoice INV-1001 from Example Office Supplies. Total: EUR 49.90. Payment due: 30 November 2026.
